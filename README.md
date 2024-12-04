@@ -526,6 +526,12 @@ follows:
 python schemachange/cli.py [-h] [--config-folder CONFIG_FOLDER] [-f ROOT_FOLDER] [-c CHANGE_HISTORY_TABLE] [--vars VARS] [--create-change-history-table] [-ac] [-v] [--dry-run] [--query-tag QUERY_TAG] [--connections-file-path] [--connection-name]
 ```
 
+Note: You may see an error like `ModuleNotFoundError: No module named 'schemachange'`.  If you are actively developing on schemachange you can try an _editable_ install which will correctly parse the schemachange library paths. Run the following:
+
+```
+pip install --editable .
+```
+
 Or if installed via `pip`, it can be executed as follows:
 
 ```
