@@ -3,11 +3,14 @@ from pathlib import Path
 
 import structlog
 from structlog import BoundLogger
+import importlib
+import pkgutil
 
 from schemachange.JinjaTemplateProcessor import JinjaTemplateProcessor
 from schemachange.config.RenderConfig import RenderConfig
 from schemachange.config.get_merged_config import get_merged_config
-from schemachange.deploy import deploy
+
+from schemachange.deploy import Deployment
 from schemachange.redact_config_secrets import redact_config_secrets
 from schemachange.session.SnowflakeSession import SnowflakeSession
 
@@ -54,6 +57,15 @@ def main():
 
     config.log_details()
 
+    # Discover all Schemachange plugins
+    logger.info("Discovering plugins")
+    discovered_plugins = {
+        name: importlib.import_module(name)
+        for finder, name, ispkg in pkgutil.iter_modules()
+        if name.startswith("schemachange_")
+    }
+    logger.debug(f"Discovered plugins [{discovered_plugins.keys()}]")
+
     # Finally, execute the command
     if config.subcommand == "render":
         render(
@@ -68,7 +80,8 @@ def main():
             logger=logger,
             **config.get_session_kwargs(),
         )
-        deploy(config=config, session=session)
+        deploy = Deployment(config=config, session=session, plugins=discovered_plugins)
+        deploy.run()
 
 
 if __name__ == "__main__":

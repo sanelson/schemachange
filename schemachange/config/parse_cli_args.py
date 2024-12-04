@@ -221,6 +221,14 @@ def parse_cli_args(args) -> dict:
         help="The string to add to the Snowflake QUERY_TAG session value for each query executed",
         required=False,
     )
+    parser_deploy.add_argument(
+        "--run-deps",
+        action="store_const",
+        const=True,
+        default=None,
+        help="Analyze SQL and re-run all dependent R__ scripts of the changed/new R__ and new V__ scripts (the default is False)",
+        required=False,
+    )
     parser_render = subcommands.add_parser(
         "render",
         description="Renders a script to the console, used to check and verify jinja output from scripts.",

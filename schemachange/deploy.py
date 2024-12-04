@@ -4,6 +4,7 @@ import hashlib
 import re
 
 import structlog
+import importlib
 
 from schemachange.JinjaTemplateProcessor import JinjaTemplateProcessor
 from schemachange.config.DeployConfig import DeployConfig
@@ -34,122 +35,193 @@ def sorted_alphanumeric(data):
     return sorted(data, key=get_alphanum_key)
 
 
-def deploy(config: DeployConfig, session: SnowflakeSession):
-    logger.info(
-        "starting deploy",
-        dry_run=config.dry_run,
-        snowflake_account=session.account,
-        default_role=session.role,
-        default_warehouse=session.warehouse,
-        default_database=session.database,
-        default_schema=session.schema,
-        change_history_table=session.change_history_table.fully_qualified,
-    )
+def import_plugin(plugin_name: str):
+    try:
+        return importlib.import_module(f"schemachange_{plugin_name}")
+    except ImportError:
+        return None
 
-    (
-        versioned_scripts,
-        r_scripts_checksum,
-        max_published_version,
-    ) = session.get_script_metadata(
-        create_change_history_table=config.create_change_history_table,
-        dry_run=config.dry_run,
-    )
 
-    max_published_version = get_alphanum_key(max_published_version)
+class Deployment:
+    def __init__(self, config: DeployConfig, session: SnowflakeSession):
+        self.config = config
+        self.session = session
 
-    # Find all scripts in the root folder (recursively) and sort them correctly
-    all_scripts = get_all_scripts_recursively(
-        root_directory=config.root_folder,
-    )
-    all_script_names = list(all_scripts.keys())
-    # Sort scripts such that versioned scripts get applied first and then the repeatable ones.
-    all_script_names_sorted = (
-        sorted_alphanumeric([script for script in all_script_names if script[0] == "v"])
-        + sorted_alphanumeric(
-            [script for script in all_script_names if script[0] == "r"]
+        # Script metadata from the filesystem
+        self.all_scripts = {}
+        self.all_script_names = []
+        self.all_script_names_sorted = []
+
+        # Script deployment statistics
+        self.scripts_skipped = 0
+        self.scripts_applied = 0
+
+        # Script metadata from the change history table
+        self.versioned_scripts = {}
+        self.r_scripts_checksum = {}
+        self.max_published_version = None
+
+        # Initialize/import plugins
+        logger.debug("Importing deployment plugins")
+        if self.config.run_deps:
+            if import_plugin("sqlutil"):
+                logger.debug("Imported sqlutil plugin")
+            else:
+                logger.error(
+                    "Failed to import sqlutil plugin, required for dependency resolution functionality"
+                )
+                raise Exception("Required plugin [schemachange_sqlutil] not installed")
+
+    def get_script_history(self):
+        (
+            self.versioned_scripts,
+            self.r_scripts_checksum,
+            self.max_published_version,
+        ) = self.session.get_script_metadata(
+            create_change_history_table=self.config.create_change_history_table,
+            dry_run=self.config.dry_run,
         )
-        + sorted_alphanumeric(
-            [script for script in all_script_names if script[0] == "a"]
-        )
-    )
 
-    scripts_skipped = 0
-    scripts_applied = 0
+        self.max_published_version = get_alphanum_key(self.max_published_version)
 
-    # Loop through each script in order and apply any required changes
-    for script_name in all_script_names_sorted:
-        script = all_scripts[script_name]
-        script_log = logger.bind(
-            # The logging keys will be sorted alphabetically.
-            # Appending 'a' is a lazy way to get the script name to appear at the start of the log
-            a_script_name=script.name,
-            script_version=getattr(script, "version", "N/A"),
+    def find_scripts(self):
+        # Find all scripts in the root folder (recursively) and sort them correctly
+        self.all_scripts = get_all_scripts_recursively(
+            root_directory=self.config.root_folder,
         )
+        self.all_script_names = list(self.all_scripts.keys())
+        # Sort scripts such that versioned scripts get applied first and then the repeatable ones.
+        self.all_script_names_sorted = (
+            sorted_alphanumeric(
+                [script for script in self.all_script_names if script[0] == "v"]
+            )
+            + sorted_alphanumeric(
+                [script for script in self.all_script_names if script[0] == "r"]
+            )
+            + sorted_alphanumeric(
+                [script for script in self.all_script_names if script[0] == "a"]
+            )
+        )
+
+    def script_content(self, script) -> list:
         # Always process with jinja engine
         jinja_processor = JinjaTemplateProcessor(
-            project_root=config.root_folder, modules_folder=config.modules_folder
+            project_root=self.config.root_folder,
+            modules_folder=self.config.modules_folder,
         )
         content = jinja_processor.render(
             jinja_processor.relpath(script.file_path),
-            config.config_vars,
+            self.config.config_vars,
         )
 
         checksum_current = hashlib.sha224(content.encode("utf-8")).hexdigest()
 
-        # Apply a versioned-change script only if the version is newer than the most recent change in the database
-        # Apply any other scripts, i.e. repeatable scripts, irrespective of the most recent change in the database
-        if script.type == "V":
-            script_metadata = versioned_scripts.get(script.name)
+        return content, checksum_current
 
-            if (
-                max_published_version is not None
-                and get_alphanum_key(script.version) <= max_published_version
-            ):
-                if script_metadata is None:
-                    script_log.debug(
-                        "Skipping versioned script because it's older than the most recently applied change",
-                        max_published_version=max_published_version,
-                    )
-                    scripts_skipped += 1
-                    continue
+    def deploy_scripts(self):
+        # Loop through each script in order and apply any required changes
+        for script_name in self.all_script_names_sorted:
+            script = self.all_scripts[script_name]
+            script_log = logger.bind(
+                # The logging keys will be sorted alphabetically.
+                # Appending 'a' is a lazy way to get the script name to appear at the start of the log
+                a_script_name=script.name,
+                script_version=getattr(script, "version", "N/A"),
+            )
+
+            # Get the content of the script and its checksum, after parsing it with the Jinja engine
+            content, checksum_current = self.script_content(script)
+
+            # Apply a versioned-change script only if the version is newer than the most recent change in the database
+            # Apply any other scripts, i.e. repeatable scripts, irrespective of the most recent change in the database
+            if script.type == "V":
+                script_metadata = self.versioned_scripts.get(script.name)
+
+                if (
+                    self.max_published_version is not None
+                    and get_alphanum_key(script.version) <= self.max_published_version
+                ):
+                    if script_metadata is None:
+                        script_log.debug(
+                            "Skipping versioned script because it's older than the most recently applied change",
+                            max_published_version=self.max_published_version,
+                        )
+                        self.scripts_skipped += 1
+                        continue
+                    else:
+                        script_log.debug(
+                            "Script has already been applied",
+                            max_published_version=self.max_published_version,
+                        )
+                        if script_metadata["checksum"] != checksum_current:
+                            script_log.info(
+                                "Script checksum has drifted since application"
+                            )
+
+                        self.scripts_skipped += 1
+                        continue
+
+            # Apply only R scripts where the checksum changed compared to the last execution of snowchange
+            if script.type == "R":
+                # check if R file was already executed
+                if (
+                    self.r_scripts_checksum is not None
+                ) and script.name in self.r_scripts_checksum:
+                    checksum_last = self.r_scripts_checksum[script.name][0]
                 else:
-                    script_log.debug(
-                        "Script has already been applied",
-                        max_published_version=max_published_version,
-                    )
-                    if script_metadata["checksum"] != checksum_current:
-                        script_log.info("Script checksum has drifted since application")
+                    checksum_last = ""
 
-                    scripts_skipped += 1
+                # check if there is a change of the checksum in the script
+                if checksum_current == checksum_last:
+                    script_log.debug(
+                        "Skipping change script because there is no change since the last execution"
+                    )
+                    self.scripts_skipped += 1
                     continue
 
-        # Apply only R scripts where the checksum changed compared to the last execution of snowchange
-        if script.type == "R":
-            # check if R file was already executed
-            if (r_scripts_checksum is not None) and script.name in r_scripts_checksum:
-                checksum_last = r_scripts_checksum[script.name][0]
-            else:
-                checksum_last = ""
+            self.session.apply_change_script(
+                script=script,
+                script_content=content,
+                dry_run=self.config.dry_run,
+                logger=script_log,
+            )
 
-            # check if there is a change of the checksum in the script
-            if checksum_current == checksum_last:
-                script_log.debug(
-                    "Skipping change script because there is no change since the last execution"
-                )
-                scripts_skipped += 1
-                continue
+            self.scripts_applied += 1
 
-        session.apply_change_script(
-            script=script,
-            script_content=content,
-            dry_run=config.dry_run,
-            logger=script_log,
+        logger.info(
+            "Completed successfully",
+            scripts_applied=self.scripts_applied,
+            scripts_skipped=self.scripts_skipped,
         )
 
-        scripts_applied += 1
+    def run(self):
+        pass
 
-    logger.info(
-        "Completed successfully",
-        scripts_applied=scripts_applied,
-        scripts_skipped=scripts_skipped,
-    )
+    def pre_deploy_tasks(self):
+        # Analyze/validate dependencies plugin
+        pass
+
+    def post_deploy_tasks(self):
+        # SQLGlot dependency resolution and dynamic table recreation plugin
+        pass
+
+    def deploy(self):
+        logger.info(
+            "starting deploy",
+            dry_run=self.config.dry_run,
+            snowflake_account=self.session.account,
+            default_role=self.session.role,
+            default_warehouse=self.session.warehouse,
+            default_database=self.session.database,
+            default_schema=self.session.schema,
+            change_history_table=self.session.change_history_table.fully_qualified,
+        )
+
+        # Pull the current script metadata and history from the database
+        self.get_script_history()
+
+        # Find and sort all scripts
+        self.find_scripts()
+
+        # Process and deploy script changes
+        self.deploy_scripts()
