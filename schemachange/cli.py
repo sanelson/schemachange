@@ -95,7 +95,7 @@ def main():
             script_path=config.script_path,
             logger=logger,
         )
-    else:
+    elif config.subcommand == "deploy":
         session = SnowflakeSession(
             schemachange_version=SCHEMACHANGE_VERSION,
             application=SNOWFLAKE_APPLICATION_NAME,
@@ -104,6 +104,9 @@ def main():
         )
         deploy = Deployment(config=config, session=session)
         deploy.run()
+    else:
+        logger.info("Custom plugin subcommand chosen", subcommand=config.subcommand)
+        config.plugin_run()
 
 
 if __name__ == "__main__":

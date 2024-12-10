@@ -101,23 +101,30 @@ def get_merged_config(logger: structlog.BoundLogger, plugin_config: PluginConfig
 
     logger.debug("final kwargs", **kwargs)
 
-    # Get unique list of supported subcommands, core + plugins
-    subcommands = list(set(plugin_config.get_subcommands() + ["deploy", "render"]))
+    #    # Get unique list of supported subcommands, core + plugins
+    #    subcommands = list(
+    #        set([*plugin_config.get_subcommands(), cli_kwargs["subcommand"]])
+    #    )
 
-    for subcommand in subcommands:
-        # TBD: Figure out plugin precedence vs core
-        # Handle Plugin Subcommands
-        for name, plugin in plugin_config.plugins.items():
-            if (
-                plugin.get_subcommand_class(subcommand).get_subcommand()
-                == cli_kwargs["subcommand"]
-            ):
-                return plugin.get_subcommand_class(subcommand).factory(**kwargs)
+    #    logger.debug("subcommands", subcommands=subcommands)
+    #    for subcommand in subcommands:
+    # TBD: Figure out plugin precedence vs core
 
-        # Handle Core Subcommands
-        if cli_kwargs["subcommand"] == "deploy":
-            return DeployConfig.factory(**kwargs)
-        elif cli_kwargs["subcommand"] == "render":
-            return RenderConfig.factory(**kwargs)
-        else:
-            raise Exception(f"unhandled subcommand: {cli_kwargs['subcommand'] }")
+    # TBD: Write method to take list of passed args and return the correct subcommand out of all loaded plugins
+    # if there is a plugin subcommand/arg clash, raise an error
+    # Handle Plugin Subcommands
+    #        for name, plugin in plugin_config.plugins.items():
+    #            if plugin_class := plugin.get_subcommand_class(subcommand):
+    #                return plugin_class.factory(**kwargs)
+    if plugin_class := plugin_config.get_plugin_class_by_kwargs(cli_kwargs):
+        return plugin_class.factory(**kwargs)
+    else:
+        logger.debug("No plugin subcommand matched, checking core subcommands")
+
+    # Handle Core Subcommands
+    if cli_kwargs["subcommand"] == "deploy":
+        return DeployConfig.factory(**kwargs)
+    elif cli_kwargs["subcommand"] == "render":
+        return RenderConfig.factory(**kwargs)
+    else:
+        raise Exception(f"unhandled subcommand: {cli_kwargs['subcommand'] }")
