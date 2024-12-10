@@ -62,7 +62,7 @@ class EnumAction(argparse.Action):
         setattr(namespace, self.dest, value)
 
 
-def parse_cli_args(plugin_config, args) -> dict:
+def parse_cli_args(plugins, args) -> dict:
     parser = argparse.ArgumentParser(
         prog="schemachange",
         description="Apply schema changes to a Snowflake account. Full readme at "
@@ -233,7 +233,7 @@ def parse_cli_args(plugin_config, args) -> dict:
 
     # Allow Schemachange plugins to add their own arguments and subcommands
     logger.info("Adding plugin arguments and subcommands")
-    plugin_config.init_parsers(
+    plugins.init_parsers(
         parent_parser=parent_parser,
         parser_subcommands=subcommands,
         parser_deploy=parser_deploy,
@@ -243,7 +243,7 @@ def parse_cli_args(plugin_config, args) -> dict:
     # The original parameters did not support subcommands. Check if a subcommand has been supplied
     # if not default to deploy to match original behaviour.
     # Merge custom plugin subcommands with the default subcommands
-    supported_subcommands = ["deploy", "render"] + plugin_config.get_subcommands()
+    supported_subcommands = ["deploy", "render"] + plugins.get_subcommands()
     supported_subcommands = [x.upper() for x in set(supported_subcommands)]
     if len(args) == 0 or not any(
         subcommand in args[0].upper() for subcommand in supported_subcommands

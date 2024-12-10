@@ -8,7 +8,7 @@ import sys
 
 from schemachange.JinjaTemplateProcessor import JinjaTemplateProcessor
 from schemachange.config.RenderConfig import RenderConfig
-from schemachange.config.PluginConfig import PluginConfig
+from schemachange.config.Plugin import PluginCollection
 from schemachange.config.get_merged_config import get_merged_config
 
 from schemachange.deploy import Deployment
@@ -76,11 +76,11 @@ def main():
     )
 
     # Load SchemaChange plugins
-    plugin_config = PluginConfig()
-    plugin_config.load_plugins()
+    plugins = PluginCollection()
+    plugins.load_plugins()
 
     # TBD: Add plugin to load list to config
-    config = get_merged_config(logger=module_logger, plugin_config=plugin_config)
+    config = get_merged_config(logger=module_logger, plugins=plugins)
     redact_config_secrets(config_secrets=config.secrets)
 
     logger = structlog.getLogger()
@@ -105,7 +105,9 @@ def main():
         deploy = Deployment(config=config, session=session)
         deploy.run()
     else:
-        logger.info("Custom plugin subcommand chosen", subcommand=config.subcommand)
+        module_logger.info(
+            "Custom plugin subcommand chosen", subcommand=config.subcommand
+        )
         config.plugin_run()
 
 

@@ -1,14 +1,10 @@
 # from __future__ import annotations
 import importlib
 import pkgutil
-from structlog import BoundLogger
-import structlog
 import re
 import structlog
 import copy
 import dataclasses
-
-# from typing import Literal, TypeVar
 
 from schemachange.config.BaseConfig import BaseConfig
 
@@ -20,14 +16,6 @@ class PluginBaseConfig(BaseConfig):
     plugin_subcommand: str | None = None
     plugin_parent_arguments: list = dataclasses.field(default_factory=list)
     plugin_subcommand_arguments: list = dataclasses.field(default_factory=list)
-    #    plugin_subcommand = None
-    #    plugin_parent_arguments = []
-    #    plugin_subcommand_arguments = []
-
-    #    def __post_init__(self):
-    #        super().__init__()
-    #
-    #        self.analyze_sql = True
 
     @classmethod
     def get_subcommand(cls):
@@ -41,15 +29,11 @@ class PluginBaseConfig(BaseConfig):
     def get_subcommand_arguments(cls):
         return cls.plugin_subcommand_arguments
 
-    #    def get_parser_kwargs(self):
-    #        kwargs = [self.plugin_parent_arguments, self.plugin_subcommand_arguments]
-
     @classmethod
     def get_all_kwargs(cls):
         kwargs = []
         class_arguments = cls.get_parent_arguments() + cls.get_subcommand_arguments()
-        logger.debug("Class arguments", class_arguments=class_arguments)
-        # for option in cls.plugin_parent_arguments, cls.plugin_subcommand_arguments:
+        logger.debug("Plugin class arguments", plugin_class_arguments=class_arguments)
         for option in class_arguments:
             kwargs.extend(option.get("name_or_flags", []))
 
@@ -57,14 +41,12 @@ class PluginBaseConfig(BaseConfig):
 
     @classmethod
     def get_clean_kwargs(cls):
-        kwargs = cls.get_all_kwargs()
-        logger.debug("All dirty plugin kwargs", kwargs=kwargs)
+        raw_kwargs = cls.get_all_kwargs()
+        logger.debug("All raw plugin kwargs", raw_kwargs=raw_kwargs)
         regex = re.compile(r"^-{1,2}")
         clean_kwargs = [
-            re.sub(regex, "", substr).replace("-", "_") for substr in kwargs
+            re.sub(regex, "", substr).replace("-", "_") for substr in raw_kwargs
         ]
-        # substitute inner dashes to underscores without regex
-        #        clean_kwargs = [substr.replace("-", "_") for substr in clean_kwargs]
         return clean_kwargs
 
     @classmethod
@@ -80,46 +62,43 @@ class PluginBaseConfig(BaseConfig):
                 return True
         return False
 
+    # Default plugin run method, override in subclass
     def plugin_run(self):
         print(f"Running {self.get_subcommand()} plugin")
         return
 
 
-class PluginConfig:
-    # TBD: What is the proper way to handle the logger without having to pass it around?
+class PluginCollection:
     def __init__(self):
-        self.logger = structlog.get_logger()
         self.plugins = {}
 
     def import_plugin(self, name: str):
         try:
             plugin = importlib.import_module(name)
         except ImportError:
-            self.logger.warning("Failed to import plugin {self.name}")
+            logger.warning(f"Failed to import plugin {name}")
             return None
-        self.logger.debug(f"Imported {name} plugin")
+        logger.debug(f"Imported {name} plugin")
         return plugin
 
     def load_plugins(self):
         # Discover all Schemachange plugins
-        self.logger.info("Discovering and importing plugins")
+        logger.info("Discovering and importing plugins")
         discovered_plugins = []
         try:
-            # for finder, name, ispkg in pkgutil.iter_modules(path=["schemachange"]):
             for finder, name, ispkg in pkgutil.iter_modules():
                 if name.startswith("schemachange_"):
-                    #                if name.startswith("schema"):
-                    self.logger.debug("Found module", name=name)
+                    logger.debug("Found module", name=name)
                     discovered_plugins.append(name)
         except Exception as e:
-            self.logger.error("Error discovering plugins", error=e)
+            logger.error("Error discovering plugins", error=e)
             return None
-        self.logger.debug("Discovered plugins", plugins=discovered_plugins)
+        logger.debug("Discovered plugins", plugins=discovered_plugins)
 
         # Import all discovered plugins
         for plugin in discovered_plugins:
             # Initialize/import plugins
-            self.logger.debug("Importing plugins")
+            logger.debug("Importing plugins")
 
             # If the plugin fails to import, skip it
             if not (plugin_module := self.import_plugin(name=plugin)):
@@ -129,7 +108,7 @@ class PluginConfig:
             try:
                 custom_plugin = plugin_module.SchemachangePlugin(name=plugin)
             except Exception as e:
-                self.logger.error(f"Error instantiating plugin {plugin}", error=e)
+                logger.error(f"Error instantiating plugin {plugin}", error=e)
                 continue
 
             self.plugins[plugin] = custom_plugin
@@ -138,7 +117,7 @@ class PluginConfig:
         self, parent_parser, parser_subcommands, parser_deploy, parser_render
     ):
         for name, plugin in self.plugins.items():
-            self.logger.debug(f"Initializing parsers for plugin {name}")
+            logger.debug("Initializing parsers for plugin", name=name)
             plugin.init_parsers(
                 parent_parser=parent_parser,
                 parser_subcommands=parser_subcommands,
@@ -149,32 +128,21 @@ class PluginConfig:
     def get_subcommands(self):
         subcommands = []
         for name, plugin in self.plugins.items():
-            self.logger.debug(f"Getting subcommands for plugin {name}")
+            logger.debug("Getting subcommands for plugin", name=name)
             subcommands.extend(plugin.get_subcommands())
 
         # Remove duplicates
         subcommands = list(set(subcommands))
-        self.logger.debug("Plugin Subcommands", subcommands=subcommands)
+        logger.debug("Supported plugin subcommands", subcommands=subcommands)
         return subcommands
 
     def get_plugin_class_by_kwargs(self, cli_kwargs):
         subcommand = cli_kwargs["subcommand"]
-        self.logger.debug("Plugins:", plugins=self.plugins)
         for name, plugin in self.plugins.items():
-            self.logger.debug("Matching plugin", name=name)
-            self.logger.debug("Matching plugin type", type=type(plugin))
-            self.logger.debug(f"Matching kwargs for plugin {name}")
-            #            plugin_class = plugin.get_subcommand_class_from_kwargs(
-            #                subcommand=subcommand, cli_kwargs=cli_kwargs
-            #            )
-            #            #            self.logger.debug(f"Matched plugin {name}")
-            #            self.logger.debug(f"Plugin matched {plugin_class.__str__()}")
-            #            return plugin_class
-
             if plugin_class := plugin.get_subcommand_class_from_kwargs(
                 subcommand=subcommand, cli_kwargs=cli_kwargs
             ):
-                self.logger.debug(f"Matched plugin {name}")
+                logger.debug("Matched plugin", name=name, plugin_class=plugin_class)
                 return plugin_class
         return None
 
@@ -185,9 +153,6 @@ class Plugin:
 
     def __init__(self, name: str):
         self.name = name
-        # self.logger = logger
-        self.logger = structlog.get_logger()
-        self.plugin_module = None
 
     def get_subcommands(self):
         return self.plugin_classes.keys()
@@ -196,9 +161,8 @@ class Plugin:
         return self.plugin_classes.get(subcommand, None)
 
     def get_subcommand_class_from_kwargs(self, subcommand, cli_kwargs):
-        self.logger.debug(f"Matching subcommand {subcommand} to plugin {self.name}")
+        logger.debug("Matching subcommand to plugin", subcommand=subcommand)
         if plugin_class := self.get_subcommand_class(subcommand=subcommand):
-            self.logger.debug(f"Matched plugin {plugin_class}")
             if plugin_class.match_class_kwargs(cli_kwargs=cli_kwargs):
                 return plugin_class
         return None

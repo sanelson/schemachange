@@ -7,7 +7,7 @@ import structlog
 
 from schemachange.config.DeployConfig import DeployConfig
 from schemachange.config.RenderConfig import RenderConfig
-from schemachange.config.PluginConfig import PluginConfig
+from schemachange.config.Plugin import PluginCollection
 from schemachange.config.parse_cli_args import parse_cli_args
 from schemachange.config.utils import (
     load_yaml_config,
@@ -46,8 +46,8 @@ def get_yaml_config_kwargs(config_file_path: Optional[Path]) -> dict:
     return {k: v for k, v in kwargs.items() if v is not None}
 
 
-def get_merged_config(logger: structlog.BoundLogger, plugin_config: PluginConfig):
-    cli_kwargs = parse_cli_args(plugin_config, sys.argv[1:])
+def get_merged_config(logger: structlog.BoundLogger, plugins: PluginCollection):
+    cli_kwargs = parse_cli_args(plugins, sys.argv[1:])
     logger.debug("cli_kwargs", **cli_kwargs)
 
     cli_config_vars = cli_kwargs.pop("config_vars")
@@ -101,22 +101,8 @@ def get_merged_config(logger: structlog.BoundLogger, plugin_config: PluginConfig
 
     logger.debug("final kwargs", **kwargs)
 
-    #    # Get unique list of supported subcommands, core + plugins
-    #    subcommands = list(
-    #        set([*plugin_config.get_subcommands(), cli_kwargs["subcommand"]])
-    #    )
-
-    #    logger.debug("subcommands", subcommands=subcommands)
-    #    for subcommand in subcommands:
-    # TBD: Figure out plugin precedence vs core
-
-    # TBD: Write method to take list of passed args and return the correct subcommand out of all loaded plugins
-    # if there is a plugin subcommand/arg clash, raise an error
     # Handle Plugin Subcommands
-    #        for name, plugin in plugin_config.plugins.items():
-    #            if plugin_class := plugin.get_subcommand_class(subcommand):
-    #                return plugin_class.factory(**kwargs)
-    if plugin_class := plugin_config.get_plugin_class_by_kwargs(cli_kwargs):
+    if plugin_class := plugins.get_plugin_class_by_kwargs(cli_kwargs):
         return plugin_class.factory(**kwargs)
     else:
         logger.debug("No plugin subcommand matched, checking core subcommands")
