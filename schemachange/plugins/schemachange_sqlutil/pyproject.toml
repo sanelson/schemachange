@@ -1,0 +1,19 @@
+[project]
+name = "schemachange-sqlutil"
+version = "0.1.0"
+description = "A Schemachange plugin for SQL utilities"
+authors = [
+    { name = "Sam Nelson", email = "sam.nelson@treasury4.com" },
+]
+dependencies = [
+    "sqlglot>=25.0",
+    "networkx>=3.0"
+]
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+readme = "README.md"
+license = { text = "MIT" }

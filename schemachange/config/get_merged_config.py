@@ -7,11 +7,12 @@ import structlog
 
 from schemachange.config.DeployConfig import DeployConfig
 from schemachange.config.RenderConfig import RenderConfig
+from schemachange.config.PluginConfig import PluginConfig
 from schemachange.config.parse_cli_args import parse_cli_args
 from schemachange.config.utils import (
     load_yaml_config,
     validate_directory,
-    validate_file_path
+    validate_file_path,
 )
 
 
@@ -45,10 +46,8 @@ def get_yaml_config_kwargs(config_file_path: Optional[Path]) -> dict:
     return {k: v for k, v in kwargs.items() if v is not None}
 
 
-def get_merged_config(
-    logger: structlog.BoundLogger,
-) -> Union[DeployConfig, RenderConfig]:
-    cli_kwargs = parse_cli_args(sys.argv[1:])
+def get_merged_config(logger: structlog.BoundLogger, plugin_config: PluginConfig):
+    cli_kwargs = parse_cli_args(plugin_config, sys.argv[1:])
     logger.debug("cli_kwargs", **cli_kwargs)
 
     cli_config_vars = cli_kwargs.pop("config_vars")
@@ -102,9 +101,23 @@ def get_merged_config(
 
     logger.debug("final kwargs", **kwargs)
 
-    if cli_kwargs["subcommand"] == "deploy":
-        return DeployConfig.factory(**kwargs)
-    elif cli_kwargs["subcommand"] == "render":
-        return RenderConfig.factory(**kwargs)
-    else:
-        raise Exception(f"unhandled subcommand: {cli_kwargs['subcommand'] }")
+    # Get unique list of supported subcommands, core + plugins
+    subcommands = list(set(plugin_config.get_subcommands() + ["deploy", "render"]))
+
+    for subcommand in subcommands:
+        # TBD: Figure out plugin precedence vs core
+        # Handle Plugin Subcommands
+        for name, plugin in plugin_config.plugins.items():
+            if (
+                plugin.get_subcommand_class(subcommand).get_subcommand()
+                == cli_kwargs["subcommand"]
+            ):
+                return plugin.get_subcommand_class(subcommand).factory(**kwargs)
+
+        # Handle Core Subcommands
+        if cli_kwargs["subcommand"] == "deploy":
+            return DeployConfig.factory(**kwargs)
+        elif cli_kwargs["subcommand"] == "render":
+            return RenderConfig.factory(**kwargs)
+        else:
+            raise Exception(f"unhandled subcommand: {cli_kwargs['subcommand'] }")

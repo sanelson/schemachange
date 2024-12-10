@@ -4,7 +4,6 @@ import hashlib
 import re
 
 import structlog
-import importlib
 
 from schemachange.JinjaTemplateProcessor import JinjaTemplateProcessor
 from schemachange.config.DeployConfig import DeployConfig
@@ -35,15 +34,10 @@ def sorted_alphanumeric(data):
     return sorted(data, key=get_alphanum_key)
 
 
-def import_plugin(plugin_name: str):
-    try:
-        return importlib.import_module(f"schemachange_{plugin_name}")
-    except ImportError:
-        return None
-
-
 class Deployment:
-    def __init__(self, config: DeployConfig, session: SnowflakeSession):
+    def __init__(
+        self, config: DeployConfig, session: SnowflakeSession, plugins: dict = {}
+    ):
         self.config = config
         self.session = session
 
@@ -60,17 +54,6 @@ class Deployment:
         self.versioned_scripts = {}
         self.r_scripts_checksum = {}
         self.max_published_version = None
-
-        # Initialize/import plugins
-        logger.debug("Importing deployment plugins")
-        if self.config.run_deps:
-            if import_plugin("sqlutil"):
-                logger.debug("Imported sqlutil plugin")
-            else:
-                logger.error(
-                    "Failed to import sqlutil plugin, required for dependency resolution functionality"
-                )
-                raise Exception("Required plugin [schemachange_sqlutil] not installed")
 
     def get_script_history(self):
         (
@@ -195,15 +178,18 @@ class Deployment:
         )
 
     def run(self):
-        pass
+        # Support plugin provided pre/post tasks
+        if hasattr(self.config, "pre_command_tasks") and callable(
+            self.config.pre_command_tasks
+        ):
+            self.config.pre_command_tasks()
 
-    def pre_deploy_tasks(self):
-        # Analyze/validate dependencies plugin
-        pass
+        self.deploy()
 
-    def post_deploy_tasks(self):
-        # SQLGlot dependency resolution and dynamic table recreation plugin
-        pass
+        if hasattr(self.config, "post_command_tasks") and callable(
+            self.config.post_command_tasks
+        ):
+            self.config.post_command_tasks()
 
     def deploy(self):
         logger.info(

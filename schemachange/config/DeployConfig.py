@@ -87,7 +87,6 @@ class DeployConfig(BaseConfig):
             "change_history_table": self.change_history_table,
             "autocommit": self.autocommit,
             "query_tag": self.query_tag,
-            "run_deps": self.run_deps,
         }
 
         # TODO: Discuss the need for check for snowflake password before passing the session

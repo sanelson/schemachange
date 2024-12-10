@@ -3,11 +3,12 @@ from pathlib import Path
 
 import structlog
 from structlog import BoundLogger
-import importlib
-import pkgutil
+import logging
+import sys
 
 from schemachange.JinjaTemplateProcessor import JinjaTemplateProcessor
 from schemachange.config.RenderConfig import RenderConfig
+from schemachange.config.PluginConfig import PluginConfig
 from schemachange.config.get_merged_config import get_merged_config
 
 from schemachange.deploy import Deployment
@@ -39,32 +40,53 @@ def render(config: RenderConfig, script_path: Path, logger: BoundLogger) -> None
     logger.info("Success", checksum=checksum, content=content)
 
 
+def set_log_level() -> None:
+    log_level_str = "INFO"
+
+    if "--verbose" in sys.argv or "-v" in sys.argv:
+        log_level_str = "DEBUG"
+    elif "--loglevel" in sys.argv:
+        log_level_str = sys.argv[sys.argv.index("--loglevel") + 1].upper()
+
+    try:
+        # Python 3.11 and later
+        if sys.version_info.major > 3 and sys.version_info.minor >= 11:
+            log_level = logging.getLevelNamesMapping()[log_level_str]
+        else:
+            # Use the older deprecated method
+            log_level = logging.getLevelName(log_level_str)
+    except KeyError:
+        module_logger.error(f"Invalid log level provided: {log_level_str}")
+
+        # Fall back to INFO
+        log_level = logging.INFO
+
+    structlog.configure(
+        wrapper_class=structlog.make_filtering_bound_logger(log_level),
+    )
+
+
 def main():
+    # Configure structlog log level early in initialization
+    set_log_level()
+
     module_logger.info(
         "schemachange version: %(schemachange_version)s"
         % {"schemachange_version": SCHEMACHANGE_VERSION}
     )
 
-    config = get_merged_config(logger=module_logger)
-    redact_config_secrets(config_secrets=config.secrets)
+    # Load SchemaChange plugins
+    plugin_config = PluginConfig()
+    plugin_config.load_plugins()
 
-    structlog.configure(
-        wrapper_class=structlog.make_filtering_bound_logger(config.log_level),
-    )
+    # TBD: Add plugin to load list to config
+    config = get_merged_config(logger=module_logger, plugin_config=plugin_config)
+    redact_config_secrets(config_secrets=config.secrets)
 
     logger = structlog.getLogger()
     logger = logger.bind(schemachange_version=SCHEMACHANGE_VERSION)
 
     config.log_details()
-
-    # Discover all Schemachange plugins
-    logger.info("Discovering plugins")
-    discovered_plugins = {
-        name: importlib.import_module(name)
-        for finder, name, ispkg in pkgutil.iter_modules()
-        if name.startswith("schemachange_")
-    }
-    logger.debug(f"Discovered plugins [{discovered_plugins.keys()}]")
 
     # Finally, execute the command
     if config.subcommand == "render":
@@ -80,7 +102,7 @@ def main():
             logger=logger,
             **config.get_session_kwargs(),
         )
-        deploy = Deployment(config=config, session=session, plugins=discovered_plugins)
+        deploy = Deployment(config=config, session=session)
         deploy.run()
 
 

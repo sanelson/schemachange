@@ -62,7 +62,7 @@ class EnumAction(argparse.Action):
         setattr(namespace, self.dest, value)
 
 
-def parse_cli_args(args) -> dict:
+def parse_cli_args(plugin_config, args) -> dict:
     parser = argparse.ArgumentParser(
         prog="schemachange",
         description="Apply schema changes to a Snowflake account. Full readme at "
@@ -221,14 +221,7 @@ def parse_cli_args(args) -> dict:
         help="The string to add to the Snowflake QUERY_TAG session value for each query executed",
         required=False,
     )
-    parser_deploy.add_argument(
-        "--run-deps",
-        action="store_const",
-        const=True,
-        default=None,
-        help="Analyze SQL and re-run all dependent R__ scripts of the changed/new R__ and new V__ scripts (the default is False)",
-        required=False,
-    )
+
     parser_render = subcommands.add_parser(
         "render",
         description="Renders a script to the console, used to check and verify jinja output from scripts.",
@@ -238,10 +231,22 @@ def parse_cli_args(args) -> dict:
         "script_path", type=str, help="Path to the script to render"
     )
 
+    # Allow Schemachange plugins to add their own arguments and subcommands
+    logger.info("Adding plugin arguments and subcommands")
+    plugin_config.init_parsers(
+        parent_parser=parent_parser,
+        parser_subcommands=subcommands,
+        parser_deploy=parser_deploy,
+        parser_render=parser_render,
+    )
+
     # The original parameters did not support subcommands. Check if a subcommand has been supplied
     # if not default to deploy to match original behaviour.
+    # Merge custom plugin subcommands with the default subcommands
+    supported_subcommands = ["deploy", "render"] + plugin_config.get_subcommands()
+    supported_subcommands = [x.upper() for x in set(supported_subcommands)]
     if len(args) == 0 or not any(
-        subcommand in args[0].upper() for subcommand in ["DEPLOY", "RENDER"]
+        subcommand in args[0].upper() for subcommand in supported_subcommands
     ):
         args = ["deploy"] + args
 
