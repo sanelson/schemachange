@@ -65,7 +65,7 @@ class PluginBaseConfig(BaseConfig):
 
     # Default plugin run method, override in subclass
     def plugin_run(self):
-        print(f"Running {self.get_subcommand()} plugin")
+        logger.info("Running plugin", plugin=self.get_subcommand())
         return
 
 
@@ -160,7 +160,7 @@ class PluginCollection:
         try:
             for finder, name, ispkg in pkgutil.iter_modules():
                 if name.startswith("schemachange_"):
-                    logger.debug("Found module", name=name)
+                    logger.debug("Found module", finder=finder, name=name, ispkg=ispkg)
                     discovered_plugins.append(name)
         except Exception as e:
             logger.error("Error discovering plugins", error=e)

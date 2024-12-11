@@ -83,7 +83,7 @@ class SnowflakeSession:
         connect_kwargs = {k: v for k, v in connect_kwargs.items() if v is not None}
         self.logger.debug("snowflake.connector.connect kwargs", **connect_kwargs)
         self.con = snowflake.connector.connect(**connect_kwargs)
-        print(f"Current session ID: {self.con.session_id}")
+        logger.info("Current session ID:", session_id=self.con.session_id)
         self.account = self.con.account
         self.user = get_snowflake_identifier_string(self.con.user, "user")
         self.role = get_snowflake_identifier_string(self.con.role, "role")
