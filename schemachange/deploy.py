@@ -35,9 +35,7 @@ def sorted_alphanumeric(data):
 
 
 class Deployment:
-    def __init__(
-        self, config: DeployConfig, session: SnowflakeSession, plugins: dict = {}
-    ):
+    def __init__(self, config: DeployConfig, session: SnowflakeSession):
         self.config = config
         self.session = session
 

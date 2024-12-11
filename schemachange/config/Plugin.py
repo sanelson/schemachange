@@ -75,16 +75,6 @@ class PluginJobConfig(PluginBaseConfig, JobConfig):
     plugin_parent_arguments = [
         {
             "name_or_flags": [
-                "--analyze-sql",
-            ],
-            "action": "store_const",
-            "const": True,
-            "default": None,
-            "help": "Analyze SQL and re-run all dependent R__ scripts of the changed/new R__ and new V__ scripts (the default is False)",
-            "required": False,
-        },
-        {
-            "name_or_flags": [
                 "--connections-file-path",
             ],
             "type": str,

@@ -245,9 +245,11 @@ def parse_cli_args(plugins, args) -> dict:
     # Merge custom plugin subcommands with the default subcommands
     supported_subcommands = ["deploy", "render"] + plugins.get_subcommands()
     supported_subcommands = [x.upper() for x in set(supported_subcommands)]
+    logger.debug(f"Supported subcommands found: {supported_subcommands}")
     if len(args) == 0 or not any(
         subcommand in args[0].upper() for subcommand in supported_subcommands
     ):
+        logger.info("No subcommand found, defaulting to deploy")
         args = ["deploy"] + args
 
     parsed_args = parser.parse_args(args)

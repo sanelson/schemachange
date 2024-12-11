@@ -8,6 +8,7 @@ import sys
 
 from schemachange.JinjaTemplateProcessor import JinjaTemplateProcessor
 from schemachange.config.RenderConfig import RenderConfig
+from schemachange.config.JobConfig import JobConfig
 from schemachange.config.Plugin import PluginCollection
 from schemachange.config.get_merged_config import get_merged_config
 
@@ -89,6 +90,7 @@ def main():
     config.log_details()
 
     # Finally, execute the command
+    logger.info("Executing subcommand", subcommand=config.subcommand)
     if config.subcommand == "render":
         render(
             config=config,
@@ -108,7 +110,20 @@ def main():
         module_logger.info(
             "Custom plugin subcommand chosen", subcommand=config.subcommand
         )
-        config.plugin_run()
+
+        # Session is only required for Job plugins
+        if JobConfig in config.__class__.__mro__:
+            module_logger.debug("Running a Job plugin")
+            session = SnowflakeSession(
+                schemachange_version=SCHEMACHANGE_VERSION,
+                application=SNOWFLAKE_APPLICATION_NAME,
+                logger=logger,
+                **config.get_session_kwargs(),
+            )
+            config.plugin_run(session=session)
+        else:
+            module_logger.debug("Running a basic plugin")
+            config.plugin_run()
 
 
 if __name__ == "__main__":
