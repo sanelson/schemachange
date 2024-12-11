@@ -7,6 +7,7 @@ import copy
 import dataclasses
 
 from schemachange.config.BaseConfig import BaseConfig
+from schemachange.config.JobConfig import JobConfig
 
 logger = structlog.getLogger(__name__)
 
@@ -66,6 +67,86 @@ class PluginBaseConfig(BaseConfig):
     def plugin_run(self):
         print(f"Running {self.get_subcommand()} plugin")
         return
+
+
+@dataclasses.dataclass(frozen=True)
+class PluginJobConfig(PluginBaseConfig, JobConfig):
+    # Common arguments used by all *Job* type plugins
+    plugin_parent_arguments = [
+        {
+            "name_or_flags": [
+                "--analyze-sql",
+            ],
+            "action": "store_const",
+            "const": True,
+            "default": None,
+            "help": "Analyze SQL and re-run all dependent R__ scripts of the changed/new R__ and new V__ scripts (the default is False)",
+            "required": False,
+        },
+        {
+            "name_or_flags": [
+                "--connections-file-path",
+            ],
+            "type": str,
+            "help": "Override the default connections.toml file path at snowflake.connector.constants.CONNECTIONS_FILE (OS specific)",
+            "required": False,
+        },
+        {
+            "name_or_flags": [
+                "--connection-name",
+            ],
+            "type": str,
+            "help": "Override the default connections.toml connection name. Other connection-related values will override these connection values.",
+            "required": False,
+        },
+        {
+            "name_or_flags": [
+                "--change-history-table",
+            ],
+            "type": str,
+            "help": "Used to override the default name of the change history table (the default is METADATA.SCHEMACHANGE.CHANGE_HISTORY)",
+            "required": False,
+        },
+        {
+            "name_or_flags": [
+                "--create-change-history-table",
+            ],
+            "action": "store_const",
+            "const": True,
+            "default": None,
+            "help": "Create the change history schema and table, if they do not exist (the default is False)",
+            "required": False,
+        },
+        {
+            "name_or_flags": [
+                "-ac",
+                "--autocommit",
+            ],
+            "action": "store_const",
+            "const": True,
+            "default": None,
+            "help": "Enable autocommit feature for DML commands (the default is False)",
+            "required": False,
+        },
+        {
+            "name_or_flags": [
+                "--dry-run",
+            ],
+            "action": "store_const",
+            "const": True,
+            "default": None,
+            "help": "Run schemachange in dry run mode (the default is False)",
+            "required": False,
+        },
+        {
+            "name_or_flags": [
+                "--query-tag",
+            ],
+            "type": str,
+            "help": "The string to add to the Snowflake QUERY_TAG session value for each query executed",
+            "required": False,
+        },
+    ]
 
 
 class PluginCollection:
@@ -177,7 +258,7 @@ class Plugin:
             plugin_parent_arguments = plugin_class.get_parent_arguments()
             for options in plugin_parent_arguments:
                 options_copy = copy.deepcopy(options)
-                name_or_flags = options.pop("name_or_flags")
+                name_or_flags = options_copy.pop("name_or_flags")
                 parent_parser.add_argument(*name_or_flags, **options_copy)
 
             # Handle Subcommand args
