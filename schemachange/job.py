@@ -84,7 +84,7 @@ class Job:
             )
         )
 
-    def script_content(self, script) -> list:
+    def render_script_content(self, script) -> str:
         # Always process with jinja engine
         jinja_processor = JinjaTemplateProcessor(
             project_root=self.config.root_folder,
@@ -95,6 +95,7 @@ class Job:
             self.config.config_vars,
         )
 
-        checksum_current = hashlib.sha224(content.encode("utf-8")).hexdigest()
+        return content
 
-        return content, checksum_current
+    def script_checksum(self, content) -> str:
+        return hashlib.sha224(content.encode("utf-8")).hexdigest()

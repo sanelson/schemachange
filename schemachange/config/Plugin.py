@@ -146,8 +146,9 @@ class PluginCollection:
     def import_plugin(self, name: str):
         try:
             plugin = importlib.import_module(name)
-        except ImportError:
+        except ImportError as e:
             logger.warning(f"Failed to import plugin {name}")
+            logger.debug("Error importing plugin: %s", e)
             return None
         logger.debug(f"Imported {name} plugin")
         return plugin

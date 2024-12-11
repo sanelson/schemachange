@@ -84,7 +84,7 @@ class Deployment:
             )
         )
 
-    def script_content(self, script) -> list:
+    def render_script_content(self, script) -> str:
         # Always process with jinja engine
         jinja_processor = JinjaTemplateProcessor(
             project_root=self.config.root_folder,
@@ -95,9 +95,10 @@ class Deployment:
             self.config.config_vars,
         )
 
-        checksum_current = hashlib.sha224(content.encode("utf-8")).hexdigest()
+        return content
 
-        return content, checksum_current
+    def script_checksum(self, content) -> str:
+        return hashlib.sha224(content.encode("utf-8")).hexdigest()
 
     def deploy_scripts(self):
         # Loop through each script in order and apply any required changes
@@ -111,7 +112,8 @@ class Deployment:
             )
 
             # Get the content of the script and its checksum, after parsing it with the Jinja engine
-            content, checksum_current = self.script_content(script)
+            content = self.render_script_content(script)
+            checksum_current = self.script_checksum(content)
 
             # Apply a versioned-change script only if the version is newer than the most recent change in the database
             # Apply any other scripts, i.e. repeatable scripts, irrespective of the most recent change in the database
