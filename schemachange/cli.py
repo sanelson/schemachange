@@ -8,6 +8,7 @@ import sys
 
 from schemachange.JinjaTemplateProcessor import JinjaTemplateProcessor
 from schemachange.config.RenderConfig import RenderConfig
+from schemachange.config.DeployConfig import DeployConfig
 from schemachange.config.JobConfig import JobConfig
 from schemachange.config.Plugin import PluginCollection
 from schemachange.config.get_merged_config import get_merged_config
@@ -91,7 +92,29 @@ def main():
 
     # Finally, execute the command
     logger.info("Executing subcommand", subcommand=config.subcommand)
-    if config.subcommand == "render":
+    # Handle enabled plugin subcommands first, including core subcommand overrides like "render" and "deploy"
+    if plugins.exist() and plugins.enabled():
+        module_logger.info(
+            "Customized plugin subcommand chosen", subcommand=config.subcommand
+        )
+
+        # Session is only required for Job/Deployment type plugins
+        if any(
+            base_class in config.__class__.__mro__
+            for base_class in [JobConfig, DeployConfig]
+        ):
+            module_logger.debug("Running a Job plugin")
+            session = SnowflakeSession(
+                schemachange_version=SCHEMACHANGE_VERSION,
+                application=SNOWFLAKE_APPLICATION_NAME,
+                logger=logger,
+                **config.get_session_kwargs(),
+            )
+            config.plugin_run(session=session)
+        else:
+            module_logger.debug("Running a basic plugin")
+            config.plugin_run()
+    elif config.subcommand == "render":
         render(
             config=config,
             script_path=config.script_path,
@@ -106,24 +129,6 @@ def main():
         )
         deploy = Deployment(config=config, session=session)
         deploy.run()
-    else:
-        module_logger.info(
-            "Custom plugin subcommand chosen", subcommand=config.subcommand
-        )
-
-        # Session is only required for Job plugins
-        if JobConfig in config.__class__.__mro__:
-            module_logger.debug("Running a Job plugin")
-            session = SnowflakeSession(
-                schemachange_version=SCHEMACHANGE_VERSION,
-                application=SNOWFLAKE_APPLICATION_NAME,
-                logger=logger,
-                **config.get_session_kwargs(),
-            )
-            config.plugin_run(session=session)
-        else:
-            module_logger.debug("Running a basic plugin")
-            config.plugin_run()
 
 
 if __name__ == "__main__":

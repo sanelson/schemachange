@@ -14,6 +14,9 @@ logger = structlog.getLogger(__name__)
 
 @dataclasses.dataclass(frozen=True)
 class PluginBaseConfig(BaseConfig):
+    plugin_name: str | None = None
+    plugin_enabled: bool = False
+    plugin_description: str | None = None
     plugin_subcommand: str | None = None
     plugin_parent_arguments: list = dataclasses.field(default_factory=list)
     plugin_subcommand_arguments: list = dataclasses.field(default_factory=list)
@@ -63,6 +66,13 @@ class PluginBaseConfig(BaseConfig):
                 return True
         return False
 
+    def __post_init__(self):
+        if not self.plugin_name:
+            self.plugin_name = type(self)
+
+        if not self.plugin_description:
+            self.plugin_description = f"Plugin: {self.plugin_name}"
+
     # Default plugin run method, override in subclass
     def plugin_run(self):
         logger.info("Running plugin", plugin=self.get_subcommand())
@@ -72,6 +82,7 @@ class PluginBaseConfig(BaseConfig):
 @dataclasses.dataclass(frozen=True)
 class PluginJobConfig(PluginBaseConfig, JobConfig):
     # Common arguments used by all *Job* type plugins
+    # This is a *hack* until the JobConfig/DeployConfig classes are refactored
     plugin_parent_arguments = [
         {
             "name_or_flags": [
@@ -142,6 +153,24 @@ class PluginJobConfig(PluginBaseConfig, JobConfig):
 class PluginCollection:
     def __init__(self):
         self.plugins = {}
+
+    def __str__(self):
+        return f"PluginCollection {self.plugins}"
+
+    def __repr__(self):
+        return self.__str__()
+
+    def exist(self):
+        if self.plugins:
+            return True
+        return False
+
+    def enabled(self):
+        enabled_plugins = []
+        for name, plugin in self.plugins.items():
+            if plugin.plugin_enabled:
+                enabled_plugins.append(plugin)
+        return enabled_plugins
 
     def import_plugin(self, name: str):
         try:
@@ -215,6 +244,8 @@ class PluginCollection:
                 subcommand=subcommand, cli_kwargs=cli_kwargs
             ):
                 logger.debug("Matched plugin", name=name, plugin_class=plugin_class)
+                # Mark plugin as enabled
+                plugin_class.plugin_enabled = True
                 return plugin_class
         return None
 
@@ -247,21 +278,54 @@ class Plugin:
 
             # Handle Parent Parser args
             plugin_parent_arguments = plugin_class.get_parent_arguments()
+
+            if not plugin_class.plugin_name:
+                plugin_class.plugin_name = plugin_class.__name__
+
+            parent_group_or_parser = parent_parser
+            # Deal with JobConfig/DeployConfig parent arguments *hack*
+            if (
+                plugin_parent_arguments
+                and PluginJobConfig not in plugin_class.__bases__
+            ):
+                parent_group_or_parser = parent_parser.add_argument_group(
+                    plugin_class.plugin_name, plugin_class.plugin_description
+                )
             for options in plugin_parent_arguments:
                 options_copy = copy.deepcopy(options)
                 name_or_flags = options_copy.pop("name_or_flags")
-                parent_parser.add_argument(*name_or_flags, **options_copy)
+                parent_group_or_parser.add_argument(*name_or_flags, **options_copy)
 
             # Handle Subcommand args
             plugin_subcommand_arguments = plugin_class.get_subcommand_arguments()
 
             # Initialize parsers for existing subcommands
             parsers = {"render": parser_render, "deploy": parser_deploy}
+            argument_groups = {}
+
+            # Initialize parser plugin group for existing subcommands
+            if plugin_subcommand_arguments and subcommand in parsers:
+                logger.debug(
+                    "Adding argument group to existing subcommand",
+                    subcommand=subcommand,
+                )
+                argument_groups[subcommand] = parsers[subcommand].add_argument_group(
+                    plugin_class.plugin_name, plugin_class.plugin_description
+                )
             for options in plugin_subcommand_arguments:
                 # Add/modify new custom subcommands
                 if subcommand not in parsers:
+                    logger.debug(
+                        "Adding new subcommand and argument group",
+                        subcommand=subcommand,
+                    )
                     parsers[subcommand] = parser_subcommands.add_parser(
                         subcommand, parents=[parent_parser]
+                    )
+                    argument_groups[subcommand] = parsers[
+                        subcommand
+                    ].add_argument_group(
+                        plugin_class.plugin_name, plugin_class.plugin_description
                     )
 
                 # Add the argument to the subcommand, existing or new
@@ -269,7 +333,7 @@ class Plugin:
                 # NOTE: Is there a better way to do this? Seems wasteful...
                 options_copy = copy.deepcopy(options)
                 name_or_flags = options_copy.pop("name_or_flags")
-                parsers[subcommand].add_argument(*name_or_flags, **options_copy)
+                argument_groups[subcommand].add_argument(*name_or_flags, **options_copy)
 
     def __str__(self):
         return f"Plugin {self.name}"
