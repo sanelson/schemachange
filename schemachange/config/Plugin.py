@@ -12,6 +12,7 @@ from schemachange.config.JobConfig import JobConfig
 logger = structlog.getLogger(__name__)
 
 
+# @dataclasses.dataclass
 @dataclasses.dataclass(frozen=True)
 class PluginBaseConfig(BaseConfig):
     plugin_name: str | None = None
@@ -68,10 +69,15 @@ class PluginBaseConfig(BaseConfig):
 
     def __post_init__(self):
         if not self.plugin_name:
-            self.plugin_name = type(self)
+            # See: https://stackoverflow.com/questions/53756788/how-to-set-the-value-of-dataclass-field-in-post-init-when-frozen-true
+            object.__setattr__(self, "plugin_name", type(self))
+            # self.plugin_name = type(self)
 
         if not self.plugin_description:
-            self.plugin_description = f"Plugin: {self.plugin_name}"
+            object.__setattr__(
+                self, "plugin_description", f"Plugin: {self.plugin_name}"
+            )
+            # self.plugin_description = f"Plugin: {self.plugin_name}"
 
     # Default plugin run method, override in subclass
     def plugin_run(self):
@@ -168,8 +174,11 @@ class PluginCollection:
     def enabled(self):
         enabled_plugins = []
         for name, plugin in self.plugins.items():
-            if plugin.plugin_enabled:
-                enabled_plugins.append(plugin)
+            # If any plugin class is enabled...
+            for plugin_class in plugin.plugin_classes.values():
+                if plugin_class.plugin_enabled:
+                    enabled_plugins.append(plugin)
+                    break
         return enabled_plugins
 
     def import_plugin(self, name: str):
@@ -244,7 +253,7 @@ class PluginCollection:
                 subcommand=subcommand, cli_kwargs=cli_kwargs
             ):
                 logger.debug("Matched plugin", name=name, plugin_class=plugin_class)
-                # Mark plugin as enabled
+                # Mark plugin and plugin class as enabled
                 plugin_class.plugin_enabled = True
                 return plugin_class
         return None
