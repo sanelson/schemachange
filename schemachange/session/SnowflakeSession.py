@@ -7,10 +7,43 @@ from textwrap import dedent, indent
 
 import snowflake.connector
 import structlog
+import os
 
 from schemachange.config.ChangeHistoryTable import ChangeHistoryTable
 from schemachange.config.utils import get_snowflake_identifier_string
 from schemachange.session.Script import VersionedScript, RepeatableScript, AlwaysScript
+
+# connection keys that can be set using SNOWFLAKE_* env vars
+SUPPORTED_ENV_OVERRIDES = [
+    "account",
+    "user",
+    "password",
+    "authenticator",
+    "private_key_path",
+    "database",
+    "schema",
+    "role",
+    "warehouse",
+    "session_token",
+    "master_token",
+    "token_file_path",
+]
+
+SENSITIVE_ENV_OVERRIDES = ["password", "session_token", "master_token"]
+
+
+def redact_arg(key: str, value: str) -> str:
+    if key in SENSITIVE_ENV_OVERRIDES:
+        return "*" * len(value)
+    return value
+
+
+def get_env_variable_name(*path, key: str) -> str:
+    return ("_".join(["snowflake", *path, key])).upper()
+
+
+def get_env_value(*path, key: str) -> str | None:
+    return os.environ.get(get_env_variable_name(*path, key=key))
 
 
 class SnowflakeSession:
@@ -80,8 +113,31 @@ class SnowflakeSession:
             "application": application,
             "session_parameters": self.session_parameters,
         }
+
+        # Filter out any unset parameters
         connect_kwargs = {k: v for k, v in connect_kwargs.items() if v is not None}
-        self.logger.debug("snowflake.connector.connect kwargs", **connect_kwargs)
+
+        # Add any supported SNOWFLAKE_* environment variable overrides that are set
+        # Command line args take precedence over env vars which take precedence over connections.toml file
+        for key in SUPPORTED_ENV_OVERRIDES:
+            generic_env_value = get_env_value(key=key)
+            if key not in connect_kwargs and generic_env_value:
+                logger.debug(
+                    "Setting connection parameter from environment",
+                    var=get_env_variable_name(key=key),
+                    value=redact_arg(key, generic_env_value),
+                )
+                connect_kwargs[key] = generic_env_value
+
+        # We want to log the connection kwargs, but be careful not to log any sensitive information
+        # TODO: Figure out how to move SNOWFLAKE_* connection override parsing to cli.py and utilize
+        # the existing structlog logic to redact sensitive information
+        redacted_kwargs = {}
+        for k, v in connect_kwargs.items():
+            redacted_kwargs[k] = redact_arg(k, v)
+        self.logger.debug("snowflake.connector.connect kwargs", **redacted_kwargs)
+
+        # Connect to Snowflake
         self.con = snowflake.connector.connect(**connect_kwargs)
         print(f"Current session ID: {self.con.session_id}")
         self.account = self.con.account
